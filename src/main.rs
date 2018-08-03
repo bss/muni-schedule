@@ -1,35 +1,27 @@
 #[macro_use] extern crate conrod;
-
-// #![deny(warnings)]
-extern crate hyper;
+#[macro_use] extern crate conrod_derive;
 
 extern crate find_folder;
 extern crate image;
+extern crate rusttype;
 
 mod event_loop;
+mod mapbox;
 
-use hyper::Client;
-use hyper::rt::{Future, Stream};
-use conrod::{widget, Colorable, Positionable, Sizeable, Widget, color};
 use conrod::backend::glium::glium;
 use conrod::backend::glium::glium::Surface;
 use event_loop::EventLoop;
-
-const MAPBOX_TOKEN : &'static str = "pk.eyJ1IjoiYnNzZGsiLCJhIjoiY2prYW42NWFlMjZkNzNra3lnYnB6djRscCJ9.KEJKmTjzzjtKVMyxS_Y93A";
-
-const TILE_WIDTH : u32 = 256;
-const TILE_HEIGHT : u32 = 256;
+use rusttype::Font;
 
 pub fn main() {
     const WIDTH: u32 = 800;
-    const HEIGHT: u32 = 600;
-    let tiles_count_width : u32 = ((WIDTH as f64) / (TILE_WIDTH as f64)).ceil() as u32;
-    let tiles_count_height : u32 = ((HEIGHT as f64) / (TILE_HEIGHT as f64)).ceil() as u32;
+    const HEIGHT: u32 = 480;
 
     // Build the window.
     let mut events_loop = glium::glutin::EventsLoop::new();
     let window = glium::glutin::WindowBuilder::new()
-        .with_title("Image Widget Demonstration")
+        .with_title("Canvas")
+        // .with_fullscreen(Some(events_loop.get_primary_monitor()));
         .with_dimensions((WIDTH, HEIGHT).into());
     let context = glium::glutin::ContextBuilder::new()
         .with_vsync(true)
@@ -39,26 +31,26 @@ pub fn main() {
     // construct our `Ui`.
     let mut ui = conrod::UiBuilder::new([WIDTH as f64, HEIGHT as f64]).build();
 
+    // Add a `Font` to the `Ui`'s `font::Map` from file.
+    // let assets = find_folder::Search::KidsThenParents(3, 5).for_folder("assets").unwrap();
+    // let font_path = assets.join("fonts/NotoSans/NotoSans-Regular.ttf");
+    // ui.fonts.insert_from_file(font_path).unwrap();
+    // ui.fonts.insert(rusttype::)
+    let font_data = include_bytes!("../assets/fonts/NotoSans/NotoSans-Regular.ttf");
+    let font_data_vector: Vec<u8> = font_data.iter().cloned().collect();
+    let font = Font::from_bytes(font_data_vector);
+    ui.fonts.insert(font.unwrap());
+    
+
     // A type used for converting `conrod::render::Primitives` into `Command`s that can be used
     // for drawing to the glium `Surface`.
     let mut renderer = conrod::backend::glium::Renderer::new(&display).unwrap();
 
-    // The `WidgetId` for our background and `Image` widgets.
-    widget_ids!(
-        struct Ids {
-            background,
-            tiles[]
-        }
-    );
-    let mut ids = Ids::new(ui.widget_id_generator());
+    // The image map describing each of our widget->image mappings (in our case, none).
+    let image_map = conrod::image::Map::<glium::texture::Texture2d>::new();
 
-    // Create our `conrod::image::Map` which describes each of our widget->image mappings.
-    // In our case we only have one image, however the macro may be used to list multiple.
-    let mut image_map = conrod::image::Map::new();
-
-    for i in 0..tiles_count_width {
-        
-    }
+    // Instantiate the generated list of widget identifiers.
+    let ids = &mut Ids::new(ui.widget_id_generator());
 
     // Poll events from the window.
     let mut event_loop = EventLoop::new();
@@ -70,6 +62,7 @@ pub fn main() {
             // Use the `winit` backend feature to convert the winit event to a conrod one.
             if let Some(event) = conrod::backend::winit::convert_event(event.clone(), &display) {
                 ui.handle_event(event);
+                event_loop.needs_update();
             }
 
             match event {
@@ -89,21 +82,8 @@ pub fn main() {
             }
         }
 
-        {
-            let ui = &mut ui.set_widgets();
-            // Draw a light blue background.
-            widget::Canvas::new().color(color::WHITE).set(ids.background, ui);
-
-
-
-            ids.tiles.resize(5, &mut ui.widget_id_generator());
-            for (i, &id) in ids.tiles.iter().enumerate() {
-                let rust_logo = load_rust_logo(&display);
-                let (w, h) = (rust_logo.get_width(), rust_logo.get_height().unwrap());
-                let rust_logo_id = image_map.insert(rust_logo);
-                widget::Image::new(rust_logo_id).w_h(w as f64, h as f64).x_y(-(w as f64) * (i as f64), 200.0).set(id, ui);
-            }
-        }
+        // Instantiate all widgets in the GUI.
+        set_widgets(ui.set_widgets(), ids);
 
         // Render the `Ui` and then display it on the screen.
         if let Some(primitives) = ui.draw_if_changed() {
@@ -116,67 +96,50 @@ pub fn main() {
     }
 }
 
-// Load the Rust logo from our assets folder to use as an example image.
-fn load_rust_logo(display: &glium::Display) -> glium::texture::Texture2d {
-    let assets = find_folder::Search::ParentsThenKids(3, 3).for_folder("assets").unwrap();
-    let path = assets.join("images/rust.png");
-    let rgba_image = image::open(&std::path::Path::new(&path)).unwrap().to_rgba();
-    let image_dimensions = rgba_image.dimensions();
-    let raw_image = glium::texture::RawImage2d::from_raw_rgba_reversed(&rgba_image.into_raw(), image_dimensions);
-    let texture = glium::texture::Texture2d::new(display, raw_image).unwrap();
-    texture
+fn set_widgets(ref mut ui: conrod::UiCell, ids: &mut Ids) {
+    use conrod::{color, widget, Colorable, Labelable, Positionable, Sizeable, Widget};
+    use mapbox::{Map, Position};
+
+    widget::Canvas::new().flow_right(&[
+        (ids.left_column, widget::Canvas::new().flow_down(&[
+            (ids.left_column_top, widget::Canvas::new().length(100.0).flow_right(&[
+                (ids.left_column_top_left, widget::Canvas::new().length(100.0).color(color::BLUE)),
+                (ids.left_column_top_right, widget::Canvas::new().color(color::GRAY)),
+            ])),
+            (ids.left_column_bottom, widget::Canvas::new().color(color::DARK_ORANGE)),
+        ])),
+        (ids.right_column, widget::Canvas::new().flow_down(&[
+            (ids.right_column_top, widget::Canvas::new().length(100.0)),
+            (ids.right_column_bottom, widget::Canvas::new().color(color::DARK_ORANGE).pad(20.0)),
+        ])),
+    ]).set(ids.master, ui);
+
+    widget::Text::new("N")
+        .color(color::WHITE)
+        .font_size(64)
+        .middle_of(ids.left_column_top_left)
+        .set(ids.left_column_top_large_text, ui);
+
+    Map::new(Position { latitude: 37.7593836, longitude: -122.48025849999999, zoom: 12 })
+        .middle_of(ids.left_column_bottom)
+        .set(ids.left_column_map, ui);
 }
 
-fn fetch_tile(tile: Tile) -> impl Future<Item=image::DynamicImage, Error=FetchError> {
-    let url = format!("https://api.mapbox.com/styles/v1/mapbox/streets-v10/tiles/{}/{}/{}?access_token={}", tile.z, tile.x, tile.y, MAPBOX_TOKEN);
-    let uri = url.parse::<hyper::Uri>().unwrap();
-    fetch_png(uri)
-}
+// Generate a unique `WidgetId` for each widget.
+widget_ids! {
+    struct Ids {
+        master,
 
-fn fetch_png(url: hyper::Uri) -> impl Future<Item=image::DynamicImage, Error=FetchError> {
-    let client = Client::new();
+        left_column,
+        left_column_top,
+        left_column_top_left,
+        left_column_top_large_text,
+        left_column_top_right,
+        left_column_bottom,
+        left_column_map,
 
-    client
-        .get(url)
-        .and_then(|res| {
-            res.into_body().concat2()
-        })
-        .from_err::<FetchError>()
-        .and_then(|body| {
-            let img = image::load_from_memory_with_format(&body.into_bytes(), image::ImageFormat::PNG)?;
-            Ok(img)
-        })
-        .from_err()
-}
-
-enum FetchError {
-    Http(hyper::Error),
-    Image(image::ImageError),
-}
-
-impl From<hyper::Error> for FetchError {
-    fn from(err: hyper::Error) -> FetchError {
-        FetchError::Http(err)
+        right_column,
+        right_column_top,
+        right_column_bottom,
     }
-}
-
-impl From<image::ImageError> for FetchError {
-    fn from(err: image::ImageError) -> FetchError {
-        FetchError::Image(err)
-    }
-}
-
-struct Tile {
-    x: i64,
-    y: i64,
-    z: u32,
-}
-
-fn get_tile_number(lat_deg: f64, lng_deg: f64, zoom: u32) -> Tile {
-    let lat_rad = lat_deg / 180.0 * std::f64::consts::PI;
-    let n = (2.0 as f64).powf(zoom as f64);
-    let x = ((lng_deg + 180.0) / 360.0 * n) as i64;
-    let y = ((1.0 - (lat_rad.tan() + (1.0 / lat_rad.cos())).ln() / std::f64::consts::PI) / 2.0 * n) as i64;
-  
-    Tile { x: x, y: y, z: zoom }
 }

@@ -1,13 +1,17 @@
 [package]
-name = "muni-schedule"
+name = "muni-schedule-rs"
 version = "0.1.0"
 authors = ["Bo Stendal Sorensen <bo@stendal-sorensen.net>"]
 
 [dependencies]
+conrod_derive = "0.1.2"
 find_folder = "0.3.0"
 image = "0.19.0"
 hyper = "0.12.7"
+rusttype = { version = "0.5.0", features = ["gpu_cache"] }
+glium = { version = "0.22" }
 
 [dependencies.conrod]
 version = "0.61.1"
+default-features = false
 features = ["winit", "glium"]

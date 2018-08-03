@@ -1,6 +1,6 @@
 use std;
 
-use conrod::backend::glium::glium;
+extern crate glium;
 
 pub struct EventLoop {
     ui_needs_update: bool,
