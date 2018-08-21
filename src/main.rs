@@ -12,6 +12,50 @@ use conrod::backend::glium::glium;
 use conrod::backend::glium::glium::Surface;
 use event_loop::EventLoop;
 use rusttype::Font;
+pub use self::mapbox::{StaticMapData, StaticMap, GeoPosition, GeoZoomPosition, OverlayItem, fetch_position, OverlayMarker};
+
+pub struct App {
+    map_data: StaticMapData,
+    // left_side: MuniLine,
+    // right_side: MuniLine,
+}
+
+pub struct MuniLine {
+    identifier: String,
+}
+
+impl App {
+    pub fn new() -> Self {
+        App {
+            map_data: StaticMapData::new(
+                GeoZoomPosition::new(37.7593836, -122.48025849999999, 13.0),
+                vec!(
+                    OverlayItem::Marker(
+                        OverlayMarker::new(
+                            GeoPosition::new(37.75527806518829, -122.49475313829402),
+                            4.0,
+                            conrod::color::LIGHT_BLUE
+                        )
+                    ),
+                    OverlayItem::Marker(
+                        OverlayMarker::new(
+                            GeoPosition::new(37.75004556510476, -122.48588970872652),
+                            4.0,
+                            conrod::color::ORANGE
+                        )
+                    ),
+                ),
+            ),
+            // left_side: MuniLine,
+            // right_side: MuniLine,
+        }
+    }
+
+    pub fn load() {
+        // My stop: 5201
+        // http://webservices.nextbus.com/service/publicJSONFeed?command=predictions&a=sf-muni&r=N&s=5201
+    }
+}
 
 pub fn main() {
     const WIDTH: u32 = 800;
@@ -46,11 +90,14 @@ pub fn main() {
     // for drawing to the glium `Surface`.
     let mut renderer = conrod::backend::glium::Renderer::new(&display).unwrap();
 
-    // The image map describing each of our widget->image mappings (in our case, none).
-    let image_map = conrod::image::Map::<glium::texture::Texture2d>::new();
-
     // Instantiate the generated list of widget identifiers.
     let ids = &mut Ids::new(ui.widget_id_generator());
+
+    // The image map describing each of our widget->image mappings (in our case, none).
+    let mut image_map = conrod::image::Map::<glium::texture::Texture2d>::new();
+
+    let mut app = App::new();
+    app.map_data.load_images(&display, &mut image_map);
 
     // Poll events from the window.
     let mut event_loop = EventLoop::new();
@@ -83,7 +130,7 @@ pub fn main() {
         }
 
         // Instantiate all widgets in the GUI.
-        set_widgets(ui.set_widgets(), ids);
+        set_widgets(ui.set_widgets(), ids, &app);
 
         // Render the `Ui` and then display it on the screen.
         if let Some(primitives) = ui.draw_if_changed() {
@@ -96,33 +143,66 @@ pub fn main() {
     }
 }
 
-fn set_widgets(ref mut ui: conrod::UiCell, ids: &mut Ids) {
-    use conrod::{color, widget, Colorable, Labelable, Positionable, Sizeable, Widget};
-    use mapbox::{Map, Position};
+fn set_widgets(ref mut ui: conrod::UiCell, ids: &mut Ids, app: &App) {
+    use conrod::{color, widget, Colorable, Sizeable, Positionable, Widget, Borderable};
 
-    widget::Canvas::new().flow_right(&[
-        (ids.left_column, widget::Canvas::new().flow_down(&[
-            (ids.left_column_top, widget::Canvas::new().length(100.0).flow_right(&[
-                (ids.left_column_top_left, widget::Canvas::new().length(100.0).color(color::BLUE)),
-                (ids.left_column_top_right, widget::Canvas::new().color(color::GRAY)),
+    widget::Canvas::new().border(0.0).flow_down(&[
+        (ids.top, widget::Canvas::new().border(0.0).length(100.0).flow_right(&[
+            (ids.top_left_column, widget::Canvas::new().border(0.0).flow_right(&[
+                (ids.top_left_column_left, widget::Canvas::new().border(0.0).length(100.0).color(color::BLUE.with_alpha(0.2))),
+                (ids.top_left_column_right, widget::Canvas::new().border(0.0).color(color::BLUE.with_alpha(0.4))),
             ])),
-            (ids.left_column_bottom, widget::Canvas::new().color(color::DARK_ORANGE)),
+            (ids.top_right_column, widget::Canvas::new().border(0.0).flow_right(&[
+                (ids.top_right_column_left, widget::Canvas::new().border(0.0).length(100.0).color(color::RED)),
+                (ids.top_right_column_right, widget::Canvas::new().border(0.0).color(color::RED)),
+            ])),
         ])),
-        (ids.right_column, widget::Canvas::new().flow_down(&[
-            (ids.right_column_top, widget::Canvas::new().length(100.0)),
-            (ids.right_column_bottom, widget::Canvas::new().color(color::DARK_ORANGE).pad(20.0)),
-        ])),
+        (ids.bottom, widget::Canvas::new().border(0.0)),
     ]).set(ids.master, ui);
 
     widget::Text::new("N")
         .color(color::WHITE)
         .font_size(64)
-        .middle_of(ids.left_column_top_left)
-        .set(ids.left_column_top_large_text, ui);
+        .center_justify()
+        .middle_of(ids.top_left_column_left)
+        .set(ids.top_left_column_left_text, ui);
 
-    Map::new(Position { latitude: 37.7593836, longitude: -122.48025849999999, zoom: 12 })
-        .middle_of(ids.left_column_bottom)
-        .set(ids.left_column_map, ui);
+    const DEMO_TEXT: &'static str = "Inbound\n\
+            Caltrain & Ball park 3min \
+            Third & ... 6min \
+            Caltrain & Ball park 8min \
+            Outbound \
+            Ocean Beach 9min \
+            Ocean Beach 18min \
+            Ocean Beach 27min";
+
+    // widget::Text::new(DEMO_TEXT)
+    //     .color(color::WHITE)
+    //     .font_size(32)
+    //     .middle_of(ids.top_left_column_right)
+    //     .set(ids.top_left_column_left_text, ui);
+
+    const PAD: conrod::Scalar = 20.0;
+
+    widget::Text::new(DEMO_TEXT)
+            // .font_id(fonts.regular)
+            .color(color::WHITE)
+            .padded_w_of(ids.top_left_column_right, PAD)
+            .mid_top_with_margin_on(ids.top_left_column_right, PAD)
+            .left_justify()
+            .line_spacing(10.0)
+            .set(ids.top_left_column_right_text, ui);
+
+    widget::Text::new("7")
+        .color(color::WHITE)
+        .font_size(64)
+        .middle_of(ids.top_right_column_left)
+        .set(ids.top_right_column_left_text, ui);
+
+    StaticMap::new(&app.map_data)
+        .wh_of(ids.bottom)
+        .middle_of(ids.bottom)
+        .set(ids.map, ui);
 }
 
 // Generate a unique `WidgetId` for each widget.
@@ -130,16 +210,18 @@ widget_ids! {
     struct Ids {
         master,
 
-        left_column,
-        left_column_top,
-        left_column_top_left,
-        left_column_top_large_text,
-        left_column_top_right,
-        left_column_bottom,
-        left_column_map,
+        top,
+        top_left_column,
+        top_left_column_left,
+        top_left_column_left_text,
+        top_left_column_right,
+        top_left_column_right_text,
+        top_right_column,
+        top_right_column_left,
+        top_right_column_left_text,
+        top_right_column_right,
+        bottom,
 
-        right_column,
-        right_column_top,
-        right_column_bottom,
+        map,
     }
 }
