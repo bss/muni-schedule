@@ -1,18 +1,7 @@
 extern crate reqwest;
 extern crate image;
 
-// mod super::util;
-
-// use self::hyper::Client;
-// use self::hyper::rt::{self, Future, Stream};
-
 const MAPBOX_TOKEN : &'static str = "pk.eyJ1IjoiYnNzZGsiLCJhIjoiY2prYW42NWFlMjZkNzNra3lnYnB6djRscCJ9.KEJKmTjzzjtKVMyxS_Y93A";
-
-// pub fn fetch_tile(tile: super::Tile) -> impl Future<Item=image::DynamicImage, Error=FetchError> {
-pub fn fetch_tile(tile: super::Tile) -> Result<image::DynamicImage, FetchError> {
-    let url = format!("https://api.mapbox.com/styles/v1/mapbox/streets-v10/tiles/{}/{}/{}?access_token={}", tile.z, tile.x, tile.y, MAPBOX_TOKEN);
-    fetch_png(url)
-}
 
 pub fn fetch_position(pos: super::GeoZoomPosition, img_width: u32, img_height: u32) -> Result<image::DynamicImage, FetchError> {
     let url = format!("https://api.mapbox.com/styles/v1/mapbox/streets-v10/static/{},{},{},0,0/{}x{}?access_token={}", pos.longitude, pos.latitude, pos.zoom, img_width, img_height, MAPBOX_TOKEN);

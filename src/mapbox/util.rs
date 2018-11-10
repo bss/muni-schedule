@@ -43,15 +43,6 @@ impl GeoZoomPosition {
         }
     }
 
-    pub fn get_tile(&self) -> Tile {
-        let lat_rad = self.latitude / 180.0 * std::f64::consts::PI;
-        let n = (2.0 as f64).powf(self.zoom);
-        let x = ((self.longitude + 180.0) / 360.0 * n) as i64;
-        let y = ((1.0 - (lat_rad.tan() + (1.0 / lat_rad.cos())).ln() / std::f64::consts::PI) / 2.0 * n) as i64;
-    
-        Tile { x: x, y: y, z: self.zoom }
-    }
-
     pub fn pixel_position(&self) -> [f64; 2] {
         let lat_rad = self.latitude / 180.0 * std::f64::consts::PI;
         let n = (2.0 as f64).powf(self.zoom);

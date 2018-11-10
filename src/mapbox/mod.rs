@@ -1,9 +1,9 @@
-extern crate find_folder;
 extern crate image;
 extern crate conrod;
 extern crate glium;
 
 mod api;
+mod vehicle_icon;
 mod util;
 
 use conrod::{Sizeable, Widget, Positionable, Rect, Range, Colorable};
@@ -12,65 +12,83 @@ use conrod::widget::{self, CommonBuilder};
 const STATIC_MAP_WIDTH: u32 = 800;
 const STATIC_MAP_HEIGHT: u32 = 800;
 
-pub use self::api::{fetch_tile, fetch_position};
+pub use self::api::{fetch_position, FetchError};
 pub use self::util::{GeoPosition, GeoZoomPosition, Tile};
+pub use super::nextbus::Direction;
 
+#[derive(Copy, Clone, Debug)]
 pub struct StaticMapData {
-    /// Position to show
     pub position: GeoZoomPosition,
-
-    map_background: Option<conrod::image::Id>,
-
-    overlay_items: Vec<OverlayItem>,
+    pub map_background: Option<conrod::image::Id>,
 }
 
 impl StaticMapData {
-    pub fn new(position: GeoZoomPosition, overlay_items: Vec<OverlayItem>) -> Self {
+    pub fn new(position: GeoZoomPosition) -> Self {
         StaticMapData {
             position: position,
             map_background: None,
-            overlay_items: overlay_items,
         }
     }
 
-    pub fn load_images(&mut self, display: &glium::Display, image_map: &mut conrod::image::Map<glium::texture::Texture2d>) {
-        if let Ok(dynamic_tile_image) = fetch_position(self.position, STATIC_MAP_WIDTH, STATIC_MAP_HEIGHT) {
-            let raw_image = match dynamic_tile_image {
-                image::ImageRgb8(val) => {
-                    let dimensions = val.dimensions();
-                    glium::texture::RawImage2d::from_raw_rgb_reversed(&val.into_raw(), dimensions)
-                },
-                image::ImageRgba8(val) => {
-                    let dimensions = val.dimensions();
-                    glium::texture::RawImage2d::from_raw_rgba_reversed(&val.into_raw(), dimensions)
-                },
-                _ => panic!("Invalid image!"),
-            };
-            if let Ok(texture) = glium::texture::Texture2d::new(display, raw_image) {
-                let image_id = image_map.insert(texture);
-                self.map_background = Some(image_id);
-            } else {
-                panic!("couldn't create texture");
-            }
-        }
+    pub fn fetch_map_background(&self) -> Result<image::DynamicImage, FetchError> {
+        fetch_position(self.position, STATIC_MAP_WIDTH, STATIC_MAP_HEIGHT)
     }
 }
 
 pub enum OverlayItem {
-    Marker(OverlayMarker)
+    Marker(OverlayMarker),
+    Path(OverlayPath),
+}
+
+impl OverlayItem {
+    pub fn marker_or_none(&self) -> Option<&OverlayMarker> {
+        match self {
+            OverlayItem::Marker(val) => Some(&val),
+            _ => None,
+        }
+    }
+
+    pub fn path_or_none(&self) -> Option<&OverlayPath> {
+        match self {
+            OverlayItem::Path(val) => Some(&val),
+            _ => None,
+        }
+    }
 }
 
 pub struct OverlayMarker {
     position: GeoPosition,
-    size: f64,
     color: conrod::Color,
+    icon: Option<conrod::image::Id>,
+    secs_since_report: u64,
+    direction: Direction,
 }
 
 impl OverlayMarker {
-    pub fn new(position: GeoPosition, size: f64, color: conrod::Color) -> Self {
+    pub fn new(position: GeoPosition, color: conrod::Color, icon: Option<conrod::image::Id>, secs_since_report: u64, direction: Direction) -> Self {
         OverlayMarker {
             position: position,
-            size: size,
+            color: color,
+            icon: icon,
+            secs_since_report: secs_since_report,
+            direction: direction,
+        }
+    }
+}
+
+pub struct OverlayPath {
+    path_start: GeoPosition,
+    path_end: GeoPosition,
+    width: f64,
+    color: conrod::Color,
+}
+
+impl OverlayPath {
+    pub fn new(path_start: GeoPosition, path_end: GeoPosition, width: f64, color: conrod::Color) -> Self {
+        OverlayPath {
+            path_start: path_start,
+            path_end: path_end,
+            width: width,
             color: color,
         }
     }
@@ -83,7 +101,8 @@ pub struct StaticMap<'a> {
     #[conrod(common_builder)]
     pub common: CommonBuilder,
 
-    pub data: &'a StaticMapData,
+    pub static_data: &'a StaticMapData,
+    pub overlay_items: &'a Vec<OverlayItem>,
 }
 
 widget_ids!(
@@ -91,7 +110,8 @@ widget_ids!(
         map_image,
         circle,
         cirlc_red,
-        overlay_items[]
+        vehicles[],
+        paths[],
     }
 );
 
@@ -101,10 +121,11 @@ pub struct State {
 }
 
 impl<'a> StaticMap<'a> {
-    pub fn new(data: &'a StaticMapData) -> Self {
+    pub fn new(static_data: &'a StaticMapData, overlay_items: &'a Vec<OverlayItem>) -> Self {
         StaticMap {
             common: widget::CommonBuilder::default(),
-            data: data,
+            static_data: static_data,
+            overlay_items: overlay_items,
         }
     }
 }
@@ -129,9 +150,9 @@ impl<'a> Widget for StaticMap<'a> {
     }
 
     fn update(self, args: widget::UpdateArgs<Self>) -> Self::Event {
-        let widget::UpdateArgs { id, state, style, rect, ui, .. } = args;
-        let StaticMap { data, .. } = self;
-        let StaticMapData { position, map_background, overlay_items, .. } = data;
+        let widget::UpdateArgs { id, state, rect, ui, .. } = args;
+        let StaticMap { static_data, overlay_items, .. } = self;
+        let StaticMapData { position, map_background, .. } = static_data;
 
         widget::Image::new(map_background.unwrap())
             .wh_of(id)
@@ -140,21 +161,31 @@ impl<'a> Widget for StaticMap<'a> {
             .source_rectangle(source_rect_for_image(rect))
             .set(state.ids.map_image, ui);
 
-        if state.ids.overlay_items.len() < overlay_items.len() {
-            state.update(|state| state.ids.overlay_items.resize(overlay_items.len(), &mut ui.widget_id_generator()));
+        
+        let overlay_markers : Vec<&OverlayMarker> = overlay_items.iter().filter_map(|it| it.marker_or_none() ).collect();
+        let overlay_paths : Vec<&OverlayPath> = overlay_items.iter().filter_map(|it| it.path_or_none() ).collect();
+
+        if state.ids.vehicles.len() < overlay_markers.len() {
+            state.update(|state| state.ids.vehicles.resize(overlay_markers.len(), &mut ui.widget_id_generator()));
+        }
+        if state.ids.paths.len() < overlay_paths.len() {
+            state.update(|state| state.ids.paths.resize(overlay_paths.len(), &mut ui.widget_id_generator()));
         }
 
-        let iter = state.ids.overlay_items.iter().zip(overlay_items.iter()).enumerate();
-        for (i, (&item_id, item)) in iter {
-            match item {
-                OverlayItem::Marker(marker) => {
-                    let xy_pos = rect_position_from_geo_position(position, marker.position, rect);
-                    widget::Circle::fill(marker.size)
-                        .color(marker.color)
-                        .xy(xy_pos)
-                        .set(item_id, ui);
-                },
-            };
+        let iter = state.ids.paths.iter().zip(overlay_paths.iter()).enumerate();
+        for (_i, (&item_id, path)) in iter {
+            let xy_pos_start = rect_position_from_geo_position(position, path.path_start, rect);
+            let xy_pos_end = rect_position_from_geo_position(position, path.path_end, rect);
+            widget::Line::abs( xy_pos_start, xy_pos_end)
+                .color(path.color)
+                .thickness(path.width)
+                .set(item_id, ui);
+        }
+
+        let iter = state.ids.vehicles.iter().zip(overlay_markers.iter()).enumerate();
+        for (_i, (&item_id, marker)) in iter {
+            let xy_pos = rect_position_from_geo_position(position, marker.position, rect);
+            vehicle_icon::VehicleIcon::new(marker).w_h(58.0, 58.0).xy(xy_pos).set(item_id, ui);
         }
     }
 }
@@ -169,6 +200,7 @@ fn source_rect_for_image(rect: Rect) -> Rect {
         y: Range::new(img_top_pad, img_top_pad + img_h),
     }
 }
+
 fn rect_position_from_geo_position(center_position: &GeoZoomPosition, position: GeoPosition, rect: Rect) -> conrod::position::Point {
     let center_pixels = center_position.pixel_position();
     let position_pixels = position.with_zoom(center_position.zoom).pixel_position();

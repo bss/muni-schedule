@@ -1,28 +1,32 @@
+extern crate reqwest;
+extern crate serde_json;
 
-#[derive(Deserialize, Debug)]
-struct Route {
-    title: String,
-    tag: String,
-    direction_a: RouteDirection,
-    direction_b: RouteDirection,
+mod route;
+mod prediction;
+mod vehicle;
+
+pub use self::route::Route;
+pub use self::prediction::Prediction;
+pub use self::vehicle::VehicleList;
+
+#[derive(Clone, Debug)]
+pub enum Direction {
+    Inbound,
+    Outbound,
+    Unknown,
 }
 
-#[derive(Deserialize, Debug)]
-struct RouteDirection {
-    stops: Vec<RouteStop>,
-    title: String,
-    name: String,
-    tag: String,
+#[derive(Deserialize, Debug, Clone)]
+#[serde(untagged)]
+enum OneOrVec<T> {
+    One(T),
+    Vector(Vec<T>),
 }
 
-#[derive(Deserialize)]
-struct RouteJsonBlob {
-    route: Route,
-}
-
+#[derive(Debug)]
 pub enum FetchError {
     Http(reqwest::Error),
-    Image(image::ImageError),
+    Json(serde_json::Error),
 }
 
 impl From<reqwest::Error> for FetchError {
@@ -31,24 +35,18 @@ impl From<reqwest::Error> for FetchError {
     }
 }
 
-impl From<image::ImageError> for FetchError {
-    fn from(err: image::ImageError) -> FetchError {
-        FetchError::Image(err)
+impl From<serde_json::Error> for FetchError {
+    fn from(err: serde_json::Error) -> FetchError {
+        FetchError::Json(err)
     }
 }
 
-const URL_TEMPLATE = "http://webservices.nextbus.com/service/publicJSONFeed?command=routeConfig&a={}&r={}"
-
-pub fn fetch_route(agency: String, route: String) -> Result<Route, FetchError> {
-    let url = format!(URL_TEMPLATE, agency, route);
-
+impl<T> OneOrVec<T> {
+    fn into_vec(self) -> Vec<T> {
+        match self {
+            OneOrVec::One(val) => vec!(val),
+            OneOrVec::Vector(vec) => vec,
+        }
+    }
 }
-
-fn fetch_png(url: String) -> Result<image::DynamicImage, FetchError> {
-    println!("Fetching url: {}", url);
-    let mut buffer: Vec<u8> = vec![];
-    let mut res = reqwest::get(&url)?.json()?;
-    res.copy_to(&mut buffer)?;
-    let img = image::load_from_memory_with_format(&buffer, image::ImageFormat::PNG)?;
-    Ok(img)
-}
+  
