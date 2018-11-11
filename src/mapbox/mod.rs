@@ -9,9 +9,6 @@ mod util;
 use conrod::{Sizeable, Widget, Positionable, Rect, Range, Colorable};
 use conrod::widget::{self, CommonBuilder};
 
-const STATIC_MAP_WIDTH: u32 = 800;
-const STATIC_MAP_HEIGHT: u32 = 800;
-
 pub use self::api::{fetch_position, FetchError};
 pub use self::util::{GeoPosition, GeoZoomPosition, Tile};
 pub use super::nextbus::Direction;
@@ -19,7 +16,14 @@ pub use super::nextbus::Direction;
 #[derive(Copy, Clone, Debug)]
 pub struct StaticMapData {
     pub position: GeoZoomPosition,
-    pub map_background: Option<conrod::image::Id>,
+    pub map_background: Option<StaticMapDataBackgroundImage>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct StaticMapDataBackgroundImage {
+    pub id: conrod::image::Id,
+    pub width: u32,
+    pub height: u32,
 }
 
 impl StaticMapData {
@@ -30,8 +34,18 @@ impl StaticMapData {
         }
     }
 
-    pub fn fetch_map_background(&self) -> Result<image::DynamicImage, FetchError> {
-        fetch_position(self.position, STATIC_MAP_WIDTH, STATIC_MAP_HEIGHT)
+    pub fn fetch_map_background(&self, width: u32, height: u32) -> Result<image::DynamicImage, FetchError> {
+        fetch_position(self.position, width, height)
+    }
+}
+
+impl StaticMapDataBackgroundImage {
+    pub fn new(id: conrod::image::Id, width: u32, height: u32) -> Self {
+        StaticMapDataBackgroundImage {
+            id: id,
+            width: width,
+            height: height,
+        }
     }
 }
 
@@ -154,11 +168,12 @@ impl<'a> Widget for StaticMap<'a> {
         let StaticMap { static_data, overlay_items, .. } = self;
         let StaticMapData { position, map_background, .. } = static_data;
 
-        widget::Image::new(map_background.unwrap())
+        let map_bg = map_background.unwrap();
+        widget::Image::new(map_bg.id)
             .wh_of(id)
             .middle_of(id)
             .graphics_for(id)
-            .source_rectangle(source_rect_for_image(rect))
+            .source_rectangle(source_rect_for_image(map_bg, rect))
             .set(state.ids.map_image, ui);
 
         
@@ -190,11 +205,11 @@ impl<'a> Widget for StaticMap<'a> {
     }
 }
 
-fn source_rect_for_image(rect: Rect) -> Rect {
+fn source_rect_for_image(background_image: StaticMapDataBackgroundImage, rect: Rect) -> Rect {
     let img_w = rect.w();
     let img_h = rect.h();
-    let img_left_pad = ((STATIC_MAP_WIDTH as f64) - img_w) / 2.0;
-    let img_top_pad = ((STATIC_MAP_HEIGHT as f64) - img_h) / 2.0;
+    let img_left_pad = ((background_image.width as f64) - img_w) / 2.0;
+    let img_top_pad = ((background_image.height as f64) - img_h) / 2.0;
     Rect {
         x: Range::new(img_left_pad, img_left_pad + img_w),
         y: Range::new(img_top_pad, img_top_pad + img_h),

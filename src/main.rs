@@ -33,20 +33,18 @@ enum GuiInputEvent {
 pub fn main() {
     let mut static_app = static_app_from_config();
 
-    let mut events_loop = glium::glutin::EventsLoop::new();
-
     let fullscreen = match env::var("FULLSCREEN") {
         Ok(val) => val == "1" || val == "true",
         Err(_) => false,
     };
+    let mut events_loop = glium::glutin::EventsLoop::new();
     let mut winit = Winit::build(&events_loop, fullscreen);
 
-    let (event_tx, event_rx) = std::sync::mpsc::channel();
-    let (render_tx, render_rx) = std::sync::mpsc::channel();
-    
-    let events_loop_proxy = events_loop.create_proxy();
+    let (monitor_width, monitor_height) = get_monitor_dimensions(&events_loop);
+    // Mapbox limits the API to return 1280x1280 max.
+    let map_bg_length = cmp::min(cmp::max(monitor_width as u32, monitor_height as u32), 1280); 
 
-    match static_app.map_data.fetch_map_background() {
+    match static_app.map_data.fetch_map_background(map_bg_length, map_bg_length) {
         Ok(val) => static_app.map_data.map_background = winit.load_image_into_image_map(val).ok(),
         Err(err) => panic!("Error! {:?}", err)
     };
@@ -56,6 +54,10 @@ pub fn main() {
     let bus_icon = winit.load_image(include_bytes!("../assets/images/bus_light.png"));
     static_app.lines.1.set_icon(bus_icon.unwrap());
 
+    let (event_tx, event_rx) = std::sync::mpsc::channel();
+    let (render_tx, render_rx) = std::sync::mpsc::channel();
+    let events_loop_proxy = events_loop.create_proxy();
+
     start_route_fetchers(static_app.lines.0.clone(), &event_tx);
     start_route_fetchers(static_app.lines.1.clone(), &event_tx);
     
@@ -64,6 +66,10 @@ pub fn main() {
     std::thread::spawn(move || run_conrod(&static_app, event_rx, render_tx, events_loop_proxy));
     
     winit.run_loop(&mut events_loop, event_tx, render_rx);
+}
+
+fn get_monitor_dimensions(events_loop: &glium::glutin::EventsLoop) -> (f64, f64) {
+    events_loop.get_primary_monitor().get_dimensions().into()
 }
 
 fn static_app_from_config() -> gui::StaticApp {
@@ -161,6 +167,7 @@ struct Winit {
 enum ImageLoadingError {
     Image(image::ImageError),
     Texture(glium::texture::TextureCreationError),
+    InvalidImage,
 }
 
 impl From<image::ImageError> for ImageLoadingError {
@@ -201,20 +208,24 @@ impl Winit {
         }
     }
 
-    pub fn load_image_into_image_map(&mut self, dynamic_image: image::DynamicImage) -> Result<conrod::image::Id, ImageLoadingError> {
-        let raw_image = match dynamic_image {
+    pub fn load_image_into_image_map(&mut self, dynamic_image: image::DynamicImage) -> Result<mapbox::StaticMapDataBackgroundImage, ImageLoadingError> {
+        match dynamic_image {
             image::ImageRgb8(val) => {
                 let dimensions = val.dimensions();
-                glium::texture::RawImage2d::from_raw_rgb_reversed(&val.into_raw(), dimensions)
+                let raw_image = glium::texture::RawImage2d::from_raw_rgb_reversed(&val.into_raw(), dimensions);
+                let texture = glium::texture::Texture2d::new(&self.display, raw_image)?;
+                let image_id = self.image_map.insert(texture);
+                Ok(mapbox::StaticMapDataBackgroundImage::new(image_id, dimensions.0, dimensions.1))
             },
             image::ImageRgba8(val) => {
                 let dimensions = val.dimensions();
-                glium::texture::RawImage2d::from_raw_rgba_reversed(&val.into_raw(), dimensions)
+                let raw_image = glium::texture::RawImage2d::from_raw_rgba_reversed(&val.into_raw(), dimensions);
+                let texture = glium::texture::Texture2d::new(&self.display, raw_image)?;
+                let image_id = self.image_map.insert(texture);
+                Ok(mapbox::StaticMapDataBackgroundImage::new(image_id, dimensions.0, dimensions.1))
             },
-            _ => panic!("Invalid image!"),
-        };
-        let texture = glium::texture::Texture2d::new(&self.display, raw_image)?;
-        Ok(self.image_map.insert(texture))
+            _ => Err(ImageLoadingError::InvalidImage),
+        }
     }
 
     pub fn load_image(&mut self, image_buffer: &[u8]) -> Result<conrod::image::Id, ImageLoadingError> {
