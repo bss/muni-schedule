@@ -66,7 +66,6 @@ fn static_app_from_config() -> gui::StaticApp {
 
     let AppConfig { map, line_left, line_right } = AppConfig::load_or_store_default();
 
-    // let line_left_color = line_left.color;
     gui::StaticApp {
         map_data: mapbox::StaticMapData::new(
             mapbox::GeoZoomPosition::new(map.latitude, map.longitude, map.zoom),
