@@ -11,12 +11,13 @@ pub fn fetch_position(pos: super::GeoZoomPosition, img_width: u32, img_height: u
 fn fetch_png(url: String) -> Result<image::DynamicImage, FetchError> {
     println!("Fetching url: {}", url);
     let mut buffer: Vec<u8> = vec![];
-    let mut res = reqwest::get(&url)?;
+    let mut res = reqwest::get(&url)?.error_for_status()?;
     res.copy_to(&mut buffer)?;
     let img = image::load_from_memory_with_format(&buffer, image::ImageFormat::PNG)?;
     Ok(img)
 }
 
+#[derive(Debug)]
 pub enum FetchError {
     Http(reqwest::Error),
     Image(image::ImageError),

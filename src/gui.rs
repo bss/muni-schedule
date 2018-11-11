@@ -8,15 +8,15 @@ use nextbus::{Route, Prediction, VehicleList};
 use mapbox::{OverlayItem, OverlayMarker, OverlayPath, GeoPosition};
 
 #[derive(Clone, Debug)]
-pub struct StaticApp<'a> {
+pub struct StaticApp {
     pub map_data: StaticMapData,
-    pub lines: (Line<'a>, Line<'a>),
+    pub lines: (Line, Line),
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct Line<'a> {
-    pub tag: &'a str,
-    pub monitor_stops: &'a [&'a str],
+#[derive(Clone, Debug)]
+pub struct Line {
+    pub tag: String,
+    pub monitor_stops: Vec<String>,
     pub color: conrod::Color,
     pub icon: Option<conrod::image::Id>,
 }
@@ -27,7 +27,7 @@ pub struct App {
     pub vehicles: HashMap<String, VehicleList>,
 }
 
-impl<'a> Line<'a> {
+impl<'a> Line {
     pub fn set_icon(&mut self, image_id: conrod::image::Id) {
         self.icon = Some(image_id);
     }
@@ -59,14 +59,24 @@ impl App {
 pub fn set_widgets(ref mut ui: conrod::UiCell, ids: &Ids, static_app: &StaticApp, dynamic_app: &App) {
     use conrod::{color, widget, Widget, Sizeable, Positionable, Borderable, Colorable};
 
-    widget::Canvas::new().border(0.0).flow_down(&[
+    widget::Canvas::new().border(0.0).flow_up(&[
+        (ids.map_container, widget::Canvas::new().border(0.0)),
         (ids.routes_container, widget::Canvas::new().border(0.0).length(100.0).flow_right(&[
             (ids.routes_col_1_container, widget::Canvas::new().border(0.0)),
             (ids.routes_col_2_container, widget::Canvas::new().border(0.0)),
         ])),
-        (ids.map_container, widget::Canvas::new().border(0.0)),
-        (ids.info_bar_container, widget::Canvas::new().border(0.0).length(20.0).color(color::DARK_CHARCOAL))
     ]).set(ids.master, ui);
+
+    let mut overlay_items = Vec::new();
+    overlay_items.extend(overlay_items_for_route(&static_app.lines.0, &dynamic_app.routes));
+    overlay_items.extend(overlay_items_for_route(&static_app.lines.1, &dynamic_app.routes));
+    overlay_items.extend(overlay_items_for_vehicles(&static_app.lines.0, &dynamic_app.vehicles));
+    overlay_items.extend(overlay_items_for_vehicles(&static_app.lines.1, &dynamic_app.vehicles));
+
+    StaticMap::new(&static_app.map_data, &overlay_items)
+        .wh_of(ids.map_container)
+        .middle_of(ids.map_container)
+        .set(ids.map, ui);
 
     let route_data_left = route_data_for_line(&static_app.lines.0, &dynamic_app.predictions);
     RouteOverview::new(&route_data_left)
@@ -80,40 +90,35 @@ pub fn set_widgets(ref mut ui: conrod::UiCell, ids: &Ids, static_app: &StaticApp
         .middle_of(ids.routes_col_2_container)
         .set(ids.routes_col_2, ui);
 
-    let mut overlay_items = Vec::new();
-    overlay_items.extend(overlay_items_for_route(&static_app.lines.0, &dynamic_app.routes));
-    overlay_items.extend(overlay_items_for_route(&static_app.lines.1, &dynamic_app.routes));
-    overlay_items.extend(overlay_items_for_vehicles(&static_app.lines.0, &dynamic_app.vehicles));
-    overlay_items.extend(overlay_items_for_vehicles(&static_app.lines.1, &dynamic_app.vehicles));
-
-    StaticMap::new(&static_app.map_data, &overlay_items)
-        .wh_of(ids.map_container)
-        .middle_of(ids.map_container)
-        .set(ids.map, ui);
-
     let oldest_fetch_maybe = dynamic_app.predictions.values().map(|v| v.seconds_since_fetch()).max();
     if let Some(oldest_fetch) = oldest_fetch_maybe {
+        widget::Rectangle::fill([0.0,0.0])
+            .w_of(ids.map_container)
+            .h(20.0)
+            .mid_bottom_of(ids.map_container)
+            .color(color::DARK_CHARCOAL.alpha(0.7))
+            .set(ids.info_bar_container, ui);
+
         widget::Text::new(&format!("{} sec", oldest_fetch))
                 .color(color::WHITE)
                 .font_size(14)
-                .center_justify()
-                .middle_of(ids.info_bar_container)
+                .right_justify()
+                .mid_right_with_margin_on(ids.info_bar_container, 5.0)
                 .set(ids.info_bar, ui);
     }
 }
 
 
 
-fn route_data_for_line(line: &Line, predictions: &HashMap<String, Prediction>) -> RouteData {
+fn route_data_for_line<'a>(line: &'a Line, predictions: &HashMap<String, Prediction>) -> RouteData<'a> {
     let mut inbound_predictions = Vec::new();
     let mut outbound_predictions = Vec::new();
-    if let Some(prediction) = predictions.get(line.tag) {
+    if let Some(prediction) = predictions.get(&line.tag) {
         inbound_predictions = prediction.inbound.iter().map( |val| val.duration().pretty_str()).collect();
         outbound_predictions = prediction.outbound.iter().map( |val| val.duration().pretty_str()).collect();
     }
     RouteData {
-        name: line.tag.clone().to_string(),
-        background_color: line.color,
+        line: line,
         inbounds: inbound_predictions,
         outbounds: outbound_predictions,
     }
@@ -144,7 +149,7 @@ impl PrettyDuration for Duration {
 
 fn overlay_items_for_route(line: &Line, routes: &HashMap<String, Route>) -> Vec<OverlayItem> {
     let mut overlay_items : Vec<OverlayItem> = vec!();
-    if let Some(route) = routes.get(line.tag) {
+    if let Some(route) = routes.get(&line.tag) {
         for section in &route.path {
             let from = GeoPosition::new(section.from.latitude, section.from.longitude);
             let to = GeoPosition::new(section.to.latitude, section.to.longitude);
@@ -178,7 +183,7 @@ impl Hueable for conrod::Color {
 
 fn overlay_items_for_vehicles(line: &Line, vehicles: &HashMap<String, VehicleList>) -> Vec<OverlayItem> {
     let mut overlay_items : Vec<OverlayItem> = vec!();
-    if let Some(vehicle_list) = vehicles.get(line.tag) {
+    if let Some(vehicle_list) = vehicles.get(&line.tag) {
         for vehicle in vehicle_list.vehicles.iter() {
             overlay_items.push(
                 OverlayItem::Marker(

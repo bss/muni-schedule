@@ -10,7 +10,9 @@ mod nextbus;
 mod mapbox;
 mod route_overview;
 mod gui;
+mod app_config;
 
+use std::{str, cmp};
 use std::time::Duration;
 use std::thread::sleep;
 
@@ -29,15 +31,7 @@ enum GuiInputEvent {
 }
 
 pub fn main() {
-    let mut static_app = gui::StaticApp {
-        map_data: mapbox::StaticMapData::new(
-            mapbox::GeoZoomPosition::new(37.7593836, -122.48025849999999, 13.0),
-        ),
-        lines: (
-            gui::Line { tag: "N", monitor_stops: &["5201", "5202"], color: conrod::color::LIGHT_BLUE, icon: None},
-            gui::Line { tag: "7", monitor_stops: &["3427", "3443"], color: conrod::color::LIGHT_RED, icon: None},
-        ),
-    };
+    let mut static_app = static_app_from_config();
 
     let mut events_loop = glium::glutin::EventsLoop::new();
     let mut winit = Winit::build(&events_loop);
@@ -49,7 +43,7 @@ pub fn main() {
 
     match static_app.map_data.fetch_map_background() {
         Ok(val) => static_app.map_data.map_background = winit.load_image_into_image_map(val).ok(),
-        Err(_) => panic!("Error!")
+        Err(err) => panic!("Error! {:?}", err)
     };
     
     let tram_icon = winit.load_image(include_bytes!("../assets/images/tram_light.png"));
@@ -67,6 +61,45 @@ pub fn main() {
     winit.run_loop(&mut events_loop, event_tx, render_rx);
 }
 
+fn static_app_from_config() -> gui::StaticApp {
+    use app_config::AppConfig;
+
+    let AppConfig { map, line_left, line_right } = AppConfig::load_or_store_default();
+
+    // let line_left_color = line_left.color;
+    gui::StaticApp {
+        map_data: mapbox::StaticMapData::new(
+            mapbox::GeoZoomPosition::new(map.latitude, map.longitude, map.zoom),
+        ),
+        lines: (
+            gui::Line { tag: line_left.tag, monitor_stops: line_left.stops, color: color_from_hex(&line_left.color), icon: None},
+            gui::Line { tag: line_right.tag, monitor_stops: line_right.stops, color: color_from_hex(&line_right.color), icon: None},
+        ),
+    }
+}
+
+fn color_from_hex(hex_str: &str) -> conrod::color::Color {
+    let parts = hex_color_str_to_bytes(hex_str);
+    conrod::color::rgb_bytes(parts[0], parts[1], parts[2])
+}
+
+fn hex_color_str_to_bytes(hex_str: &str) -> [u8; 3] {
+    assert!(hex_str.len()>= 3);
+
+    let chunk_size = cmp::min(2, (hex_str.len()/3) as u8) as usize;
+    let mut chunked_iter = hex_str.as_bytes().chunks(chunk_size);
+    let mut out = [0u8; 3];
+    for i in 0..3 {
+        let part = chunked_iter.next().unwrap();
+        let hex_str = match part.len() {
+            1 => { [part[0], part[0]] },
+            _ => { [part[0], part[1]] }
+        };
+        out[i] = u8::from_str_radix(str::from_utf8(&hex_str).unwrap(), 16).unwrap();
+    }
+    out
+}
+
 fn redraw_thread(event_tx: std::sync::mpsc::Sender<GuiInputEvent>) {
     loop {
         event_tx.send(GuiInputEvent::ConrodInput(conrod::event::Input::Redraw)).unwrap();
@@ -74,15 +107,15 @@ fn redraw_thread(event_tx: std::sync::mpsc::Sender<GuiInputEvent>) {
     }
 }
 
-fn start_route_fetchers(line: gui::Line<'static>, event_tx: &std::sync::mpsc::Sender<GuiInputEvent>) {
-    (|tx| { std::thread::spawn(move || route_fetcher_loop(line.tag, tx)) })(event_tx.clone());
-    (|tx| { std::thread::spawn(move || prediction_fetcher_loop(line.tag, &line.monitor_stops.to_vec(), tx)) })(event_tx.clone());
-    (|tx| { std::thread::spawn(move || vehicle_fetcher_loop(line.tag, tx)) })(event_tx.clone());
+fn start_route_fetchers(line: gui::Line, event_tx: &std::sync::mpsc::Sender<GuiInputEvent>) {
+    (|line, tx| { std::thread::spawn(move || route_fetcher_loop(line, tx)) })(line.clone(), event_tx.clone());
+    (|line, tx| { std::thread::spawn(move || prediction_fetcher_loop(line, tx)) })(line.clone(), event_tx.clone());
+    (|line, tx| { std::thread::spawn(move || vehicle_fetcher_loop(line, tx)) })(line.clone(), event_tx.clone());
 }
 
-fn route_fetcher_loop(line: &str, event_tx: std::sync::mpsc::Sender<GuiInputEvent>) {
+fn route_fetcher_loop(line: gui::Line, event_tx: std::sync::mpsc::Sender<GuiInputEvent>) {
     loop {
-        let route = nextbus::Route::fetch("sf-muni", &line);
+        let route = nextbus::Route::fetch("sf-muni", &line.tag);
         match route {
             Ok(val) => event_tx.send(GuiInputEvent::RouteData(val)).unwrap(),
             Err(err) => println!("Error fetching route: {:?}", err)
@@ -91,9 +124,10 @@ fn route_fetcher_loop(line: &str, event_tx: std::sync::mpsc::Sender<GuiInputEven
     }
 }
 
-fn prediction_fetcher_loop(line_tag: &str, monitor_stops: &Vec<&str>, event_tx: std::sync::mpsc::Sender<GuiInputEvent>) {
+fn prediction_fetcher_loop(line: gui::Line, event_tx: std::sync::mpsc::Sender<GuiInputEvent>) {
     loop {
-        let prediction = nextbus::Prediction::fetch("sf-muni", &line_tag, monitor_stops);
+        let monitor_stop_refs = &line.monitor_stops.iter().map(|v| v.as_ref()).collect();
+        let prediction = nextbus::Prediction::fetch("sf-muni", &line.tag, monitor_stop_refs);
         match prediction {
             Ok(val) => event_tx.send(GuiInputEvent::PredictionData(val)).unwrap(),
             Err(err) => println!("Error fetching prediction: {:?}", err)
@@ -102,9 +136,9 @@ fn prediction_fetcher_loop(line_tag: &str, monitor_stops: &Vec<&str>, event_tx: 
     }
 }
 
-fn vehicle_fetcher_loop(line: &str, event_tx: std::sync::mpsc::Sender<GuiInputEvent>) {
+fn vehicle_fetcher_loop(line: gui::Line, event_tx: std::sync::mpsc::Sender<GuiInputEvent>) {
     loop {
-        let route = nextbus::VehicleList::fetch("sf-muni", &line, 0);
+        let route = nextbus::VehicleList::fetch("sf-muni", &line.tag, 0);
         match route {
             Ok(val) => event_tx.send(GuiInputEvent::VehicleData(val)).unwrap(),
             Err(err) => println!("Error fetching route: {:?}", err)

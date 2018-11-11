@@ -5,10 +5,10 @@ extern crate glium;
 use std::cmp;
 use conrod::{color, Sizeable, Widget, Positionable, Colorable, Borderable};
 use conrod::widget::{self, CommonBuilder};
+use super::gui;
 
-pub struct RouteData {
-    pub name: String,
-    pub background_color: conrod::Color,
+pub struct RouteData<'a> {
+    pub line: &'a gui::Line,
     pub inbounds: Vec<String>,
     pub outbounds: Vec<String>,
 }
@@ -18,7 +18,7 @@ pub struct RouteOverview<'a> {
     #[conrod(common_builder)]
     pub common: CommonBuilder,
 
-    pub data: &'a RouteData,
+    pub data: &'a RouteData<'a>,
 }
 
 widget_ids!(
@@ -75,17 +75,17 @@ impl<'a> Widget for RouteOverview<'a> {
     fn update(self, args: widget::UpdateArgs<Self>) -> Self::Event {
         let widget::UpdateArgs { state, ui, .. } = args;
         let RouteOverview { data, .. } = self;
-        let RouteData { name, background_color, inbounds, outbounds, .. } = data;
+        let RouteData { line, inbounds, outbounds, .. } = data;
 
         widget::Canvas::new().border(0.0).flow_right(&[
-            (state.ids.name_container, widget::Canvas::new().border(0.0).length(100.0).color(background_color.with_alpha(0.4))),
+            (state.ids.name_container, widget::Canvas::new().border(0.0).length(100.0).color(line.color.with_alpha(0.4))),
             (state.ids.timing_cols, widget::Canvas::new().border(0.0).flow_right(&[
-                (state.ids.timing_list_left, widget::Canvas::new().border(0.0).color(background_color.with_alpha(0.4))),
-                (state.ids.timing_list_right, widget::Canvas::new().border(0.0).color(background_color.with_alpha(0.4))),
+                (state.ids.timing_list_left, widget::Canvas::new().border(0.0).color(line.color.with_alpha(0.4))),
+                (state.ids.timing_list_right, widget::Canvas::new().border(0.0).color(line.color.with_alpha(0.4))),
             ])),
         ]).set(state.ids.master_container, ui);
 
-        widget::Text::new(name)
+        widget::Text::new(&line.tag)
             .color(color::WHITE)
             .font_size(64)
             .w(64.0)
