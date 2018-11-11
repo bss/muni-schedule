@@ -12,7 +12,7 @@ mod route_overview;
 mod gui;
 mod app_config;
 
-use std::{str, cmp};
+use std::{str, cmp, env};
 use std::time::Duration;
 use std::thread::sleep;
 
@@ -34,7 +34,12 @@ pub fn main() {
     let mut static_app = static_app_from_config();
 
     let mut events_loop = glium::glutin::EventsLoop::new();
-    let mut winit = Winit::build(&events_loop);
+
+    let fullscreen = match env::var("FULLSCREEN") {
+        Ok(val) => val == "1" || val == "true",
+        Err(_) => false,
+    };
+    let mut winit = Winit::build(&events_loop, fullscreen);
 
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     let (render_tx, render_rx) = std::sync::mpsc::channel();
@@ -171,11 +176,18 @@ impl From<glium::texture::TextureCreationError> for ImageLoadingError {
 }
 
 impl Winit {
-    pub fn build(events_loop: &glium::glutin::EventsLoop) -> Self {
-        // Build the window.
-        let window = glium::glutin::WindowBuilder::new()
-            .with_title("Muni Schedule")
-            .with_dimensions((WIN_W, WIN_H).into());
+    pub fn build(events_loop: &glium::glutin::EventsLoop, fullscreen: bool) -> Self {
+        let window;
+        if fullscreen {
+            window = glium::glutin::WindowBuilder::new()
+                .with_title("Muni Schedule")
+                .with_fullscreen(Some(events_loop.get_primary_monitor()));
+        } else {
+            window = glium::glutin::WindowBuilder::new()
+                .with_title("Muni Schedule")
+                .with_dimensions((WIN_W, WIN_H).into());
+        }
+
         let context = glium::glutin::ContextBuilder::new()
             .with_vsync(true)
             .with_multisampling(4);
