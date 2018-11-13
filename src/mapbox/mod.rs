@@ -168,14 +168,14 @@ impl<'a> Widget for StaticMap<'a> {
         let StaticMap { static_data, overlay_items, .. } = self;
         let StaticMapData { position, map_background, .. } = static_data;
 
-        let map_bg = map_background.unwrap();
-        widget::Image::new(map_bg.id)
-            .wh_of(id)
-            .middle_of(id)
-            .graphics_for(id)
-            .source_rectangle(source_rect_for_image(map_bg, rect))
-            .set(state.ids.map_image, ui);
-
+        if let Some(map_bg) = map_background {
+            widget::Image::new(map_bg.id)
+                .wh_of(id)
+                .middle_of(id)
+                .graphics_for(id)
+                .source_rectangle(source_rect_for_image(map_bg, rect))
+                .set(state.ids.map_image, ui);
+        }
         
         let overlay_markers : Vec<&OverlayMarker> = overlay_items.iter().filter_map(|it| it.marker_or_none() ).collect();
         let overlay_paths : Vec<&OverlayPath> = overlay_items.iter().filter_map(|it| it.path_or_none() ).collect();
@@ -205,7 +205,7 @@ impl<'a> Widget for StaticMap<'a> {
     }
 }
 
-fn source_rect_for_image(background_image: StaticMapDataBackgroundImage, rect: Rect) -> Rect {
+fn source_rect_for_image(background_image: &StaticMapDataBackgroundImage, rect: Rect) -> Rect {
     let img_w = rect.w();
     let img_h = rect.h();
     let img_left_pad = ((background_image.width as f64) - img_w) / 2.0;

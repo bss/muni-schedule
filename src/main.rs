@@ -49,10 +49,16 @@ pub fn main() {
         Err(err) => panic!("Error! {:?}", err)
     };
     
-    let tram_icon = winit.load_image(include_bytes!("../assets/images/tram_light.png"));
-    static_app.lines.0.set_icon(tram_icon.unwrap());
-    let bus_icon = winit.load_image(include_bytes!("../assets/images/bus_light.png"));
-    static_app.lines.1.set_icon(bus_icon.unwrap());
+
+    // Todo configure this from config file instead of hardcoding it
+    match winit.load_image(include_bytes!("../assets/images/tram_light.png")) {
+        Ok(val) => static_app.lines.0.set_icon(val),
+        Err(err) => println!("Could not load tram icon, continueing without"),
+    };
+    match winit.load_image(include_bytes!("../assets/images/bus_light.png")) {
+        Ok(val) => static_app.lines.1.set_icon(val),
+        Err(err) => println!("Could not load bus icon, continueing without"),
+    };
 
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     let (render_tx, render_rx) = std::sync::mpsc::channel();
@@ -112,7 +118,7 @@ fn hex_color_str_to_bytes(hex_str: &str) -> [u8; 3] {
 
 fn redraw_thread(event_tx: std::sync::mpsc::Sender<GuiInputEvent>) {
     loop {
-        event_tx.send(GuiInputEvent::ConrodInput(conrod::event::Input::Redraw)).unwrap();
+        event_tx.send(GuiInputEvent::ConrodInput(conrod::event::Input::Redraw)).unwrap_or(());
         sleep(Duration::new(1, 0));
     }
 }
@@ -127,7 +133,7 @@ fn route_fetcher_loop(line: gui::Line, event_tx: std::sync::mpsc::Sender<GuiInpu
     loop {
         let route = nextbus::Route::fetch("sf-muni", &line.tag);
         match route {
-            Ok(val) => event_tx.send(GuiInputEvent::RouteData(val)).unwrap(),
+            Ok(val) => event_tx.send(GuiInputEvent::RouteData(val)).unwrap_or(()),
             Err(err) => println!("Error fetching route: {:?}", err)
         };
         sleep(Duration::new(15*60, 0));
@@ -139,7 +145,7 @@ fn prediction_fetcher_loop(line: gui::Line, event_tx: std::sync::mpsc::Sender<Gu
         let monitor_stop_refs = &line.monitor_stops.iter().map(|v| v.as_ref()).collect();
         let prediction = nextbus::Prediction::fetch("sf-muni", &line.tag, monitor_stop_refs);
         match prediction {
-            Ok(val) => event_tx.send(GuiInputEvent::PredictionData(val)).unwrap(),
+            Ok(val) => event_tx.send(GuiInputEvent::PredictionData(val)).unwrap_or(()),
             Err(err) => println!("Error fetching prediction: {:?}", err)
         };
         sleep(Duration::new(30, 0));
@@ -150,7 +156,7 @@ fn vehicle_fetcher_loop(line: gui::Line, event_tx: std::sync::mpsc::Sender<GuiIn
     loop {
         let route = nextbus::VehicleList::fetch("sf-muni", &line.tag, 0);
         match route {
-            Ok(val) => event_tx.send(GuiInputEvent::VehicleData(val)).unwrap(),
+            Ok(val) => event_tx.send(GuiInputEvent::VehicleData(val)).unwrap_or(()),
             Err(err) => println!("Error fetching route: {:?}", err)
         };
         sleep(Duration::new(15, 0));
@@ -257,7 +263,7 @@ impl Winit {
             events_loop.run_forever(|event| {
                 // Use the `winit` backend feature to convert the winit event to a conrod one.
                 if let Some(event) = conrod::backend::winit::convert_event(event.clone(), &self.display) {
-                    event_tx.send(GuiInputEvent::ConrodInput(event)).unwrap();
+                    event_tx.send(GuiInputEvent::ConrodInput(event)).unwrap_or(());
                 }
 
                 match event {
@@ -304,7 +310,7 @@ impl Winit {
         self.renderer.fill(&self.display, primitives.walk(), &self.image_map);
         let mut target = self.display.draw();
         target.clear_color(0.0, 0.0, 0.0, 1.0);
-        self.renderer.draw(&self.display, &mut target, &self.image_map).unwrap();
+        self.renderer.draw(&self.display, &mut target, &self.image_map).unwrap_or(());
         target.finish().unwrap();
     }
 }

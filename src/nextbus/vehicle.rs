@@ -60,8 +60,8 @@ impl VehicleList {
         let body = response.text()?;
         match serde_json::from_str(&body) {
             Ok(val) => {
-                let vehicle_blob : JsonVehicleBlob = val;
-                Ok(VehicleList::from(vehicle_blob))
+                // let vehicle_blob : JsonVehicleBlob = val;
+                Ok(VehicleList::from(val)?)
             },
             Err(err) => {
                 println!("Got err for url: {}", url);
@@ -71,22 +71,20 @@ impl VehicleList {
             }
         }
     }
-}
 
-impl From<JsonVehicleBlob> for VehicleList {
-    fn from(json_vehicle: JsonVehicleBlob) -> VehicleList {
+    fn from(json_vehicle: JsonVehicleBlob) -> Result<VehicleList, FetchError> {
         let json_vehicles = json_vehicle.vehicle.into_vec();
-        let route_tag = json_vehicles.iter().filter_map(|v| v.route_tag.clone() ).next().unwrap();
-        VehicleList {
+        let route_tag = json_vehicles.iter().filter_map(|v| v.route_tag.clone() ).next().ok_or(FetchError::Other)?;
+        Ok(VehicleList {
             route_tag: route_tag,
-            vehicles: json_vehicles.into_iter().map(|v| Vehicle::from(v)).collect(),
-            last_time: json_vehicle.last_time.time.parse::<u64>().unwrap(),
-        }
+            vehicles: json_vehicles.into_iter().filter_map(|v| Vehicle::from(v).ok() ).collect(),
+            last_time: json_vehicle.last_time.time.parse::<u64>()?,
+        })
     }
 }
 
-impl From<JsonVehicle> for Vehicle {
-    fn from(json_vehicle: JsonVehicle) -> Vehicle {
+impl Vehicle {
+    fn from(json_vehicle: JsonVehicle) -> Result<Vehicle, FetchError> {
         let dir_tag = json_vehicle.dir_tag.clone().unwrap_or(String::new());
         let direction;
         if dir_tag.contains("__I_") {
@@ -96,17 +94,17 @@ impl From<JsonVehicle> for Vehicle {
         } else {
             direction = Direction::Unknown;
         }
-        Vehicle {
+        Ok(Vehicle {
             id: json_vehicle.id.clone(),
-            lon: json_vehicle.lon.clone().parse::<f64>().unwrap(),
+            lon: json_vehicle.lon.clone().parse::<f64>()?,
             route_tag: json_vehicle.route_tag.clone(),
-            predictable: json_vehicle.predictable.clone().parse::<bool>().unwrap(),
-            speed_km_hr: json_vehicle.speed_km_hr.clone().parse::<f64>().unwrap(),
+            predictable: json_vehicle.predictable.clone().parse::<bool>()?,
+            speed_km_hr: json_vehicle.speed_km_hr.clone().parse::<f64>()?,
             direction: direction,
             leading_vehicle_id: json_vehicle.leading_vehicle_id.clone(),
             heading: json_vehicle.heading.clone(),
-            lat: json_vehicle.lat.clone().parse::<f64>().unwrap(),
-            secs_since_report: json_vehicle.secs_since_report.clone().parse::<u64>().unwrap(),
-        }
+            lat: json_vehicle.lat.clone().parse::<f64>()?,
+            secs_since_report: json_vehicle.secs_since_report.clone().parse::<u64>()?,
+        })
     }
 }

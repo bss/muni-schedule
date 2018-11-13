@@ -127,9 +127,9 @@ impl From<JsonRoute> for Route {
             outbound = Direction::from(&direction_0, &json_route.stop);
         };
 
-        let path : Vec<PathSection> = json_route.path.into_iter().flat_map( |rp| 
-            json_route_path_to_path_secions(rp)
-        ).collect();
+        let path : Vec<PathSection> = json_route.path.into_iter().filter_map( |rp| 
+            json_route_path_to_path_secions(rp).ok()
+        ).flatten().collect();
 
         Route {
             title: json_route.title,
@@ -142,17 +142,17 @@ impl From<JsonRoute> for Route {
     }
 }
 
-fn json_route_path_to_path_secions(json_route_path: JsonRoutePath) -> Vec<PathSection> {
+fn json_route_path_to_path_secions(json_route_path: JsonRoutePath) -> Result<Vec<PathSection>, FetchError> {
     let mut sections : Vec<PathSection> = vec!();
     if json_route_path.point.len() > 0 {
         for i in 0..(json_route_path.point.len()-1) {
-            let from = PathPoint::from(json_route_path.point[i].clone());
-            let to = PathPoint::from(json_route_path.point[i+1].clone());
+            let from = PathPoint::from(json_route_path.point[i].clone())?;
+            let to = PathPoint::from(json_route_path.point[i+1].clone())?;
             let s = PathSection::new(from, to);
             sections.push(s);
         }
     }
-    sections
+    Ok(sections)
 }
 
 impl Direction {
@@ -161,21 +161,21 @@ impl Direction {
             title: json_direction.title.clone(),
             name: json_direction.name.clone(),
             tag: json_direction.tag.clone(),
-            stops: json_direction.stop.iter().map( |stop_tag| Stop::from(stop_tag, stops) ).collect(),
+            stops: json_direction.stop.iter().filter_map( |stop_tag| Stop::from(stop_tag, stops).ok() ).collect(),
         }
     }
 }
 
 impl Stop {
-    fn from(stop_tag: &JsonRouteDirectionStopTag, stops: &Vec<JsonRouteStop>) -> Stop {
-        let stop : &JsonRouteStop = stops.iter().find( |s| s.tag == stop_tag.tag).unwrap();
-        Stop {
+    fn from(stop_tag: &JsonRouteDirectionStopTag, stops: &Vec<JsonRouteStop>) -> Result<Stop, FetchError> {
+        let stop : &JsonRouteStop = stops.iter().find( |s| s.tag == stop_tag.tag).ok_or(FetchError::Other)?;
+        Ok(Stop {
             title: stop.title.clone(),
             stop_id: stop.stop_id.clone(),
             tag: stop.tag.clone(),
-            lat: stop.lat.parse::<f64>().unwrap(),
-            lon: stop.lon.parse::<f64>().unwrap(),
-        }
+            lat: stop.lat.parse::<f64>()?,
+            lon: stop.lon.parse::<f64>()?,
+        })
     }
 }
 
@@ -188,11 +188,11 @@ impl PathSection {
     }
 }
 
-impl From<JsonRoutePathPoint> for PathPoint {
-    fn from(json_path_point: JsonRoutePathPoint) -> Self {
-        PathPoint {
-            latitude: json_path_point.lat.parse::<f64>().unwrap(),
-            longitude: json_path_point.lon.parse::<f64>().unwrap(),
-        }
+impl PathPoint {
+    fn from(json_path_point: JsonRoutePathPoint) -> Result<Self, FetchError> {
+        Ok(PathPoint {
+            latitude: json_path_point.lat.parse::<f64>()?,
+            longitude: json_path_point.lon.parse::<f64>()?,
+        })
     }
 }
