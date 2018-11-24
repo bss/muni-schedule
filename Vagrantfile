@@ -31,14 +31,20 @@ Vagrant.configure("2") do |config|
 
     mkdir -p ~/.cargo
     echo "[target.armv7-unknown-linux-gnueabihf]" > ~/.cargo/config
-    echo "linker = \"arm-linux-gnueabihf-gcc\"" >> ~/.cargo/config
+    echo 'linker = \"arm-linux-gnueabihf-gcc\"' >> ~/.cargo/config
 
-    wget https://www.openssl.org/source/openssl-1.1.0f.tar.gz
-    tar xzf openssl-1.1.0f.tar.gz
+    if [ ! -f openssl-1.1.0f.tar.gz ]; then
+      wget https://www.openssl.org/source/openssl-1.1.0f.tar.gz
+    fi
+    if [ ! -d openssl-1.1.0f ]; then
+      tar xzf openssl-1.1.0f.tar.gz
+    fi
     pushd openssl-1.1.0f
     CROSS_COMPILE="arm-linux-gnueabihf-" ./Configure --prefix=$HOME/openssl linux-armv4 -march=armv7-a -Wa,--noexecstack
     make
     make install
     popd
+
+    grep OPENSSL_DIR ~/.bashrc || echo 'export OPENSSL_DIR=\"$HOME/openssl\"' >> ~/.bashrc
   SHELL
 end
